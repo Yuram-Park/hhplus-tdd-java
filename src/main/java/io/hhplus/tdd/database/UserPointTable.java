@@ -1,6 +1,7 @@
 package io.hhplus.tdd.database;
 
 import io.hhplus.tdd.point.UserPoint;
+import lombok.NoArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
