@@ -1,7 +1,10 @@
 package io.hhplus.tdd;
 
+import io.hhplus.tdd.database.PointHistoryTable;
 import io.hhplus.tdd.database.UserPointTable;
+import io.hhplus.tdd.point.PointHistory;
 import io.hhplus.tdd.point.PointService;
+import io.hhplus.tdd.point.TransactionType;
 import io.hhplus.tdd.point.UserPoint;
 import org.apache.catalina.User;
 import org.junit.jupiter.api.DisplayName;
@@ -13,11 +16,14 @@ import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.awaitility.Awaitility.given;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -25,6 +31,9 @@ public class PointServiceTest {
 
     @Mock
     private UserPointTable userPointTable;
+
+    @Mock
+    private PointHistoryTable pointHistoryTable;
 
     @InjectMocks
     private PointService pointService;
@@ -123,5 +132,72 @@ public class PointServiceTest {
 
         // then
         assertThrows(IllegalArgumentException.class, () -> {pointService.usePoint(id, usePoint);});
+    }
+
+    /**
+     * 포인트를 조회한다.
+     * 요구사항 1. 해당 id의 잔액을 확인 할 수 있다.
+     */
+    @Test
+    void getTest1() {
+        // given
+        long id = 1;
+        long remainingPoint = 1000;
+
+        UserPoint userPoint = new UserPoint(id, remainingPoint, System.currentTimeMillis());
+        when(userPointTable.selectById(id)).thenReturn(userPoint);
+
+        // when, then
+        assertThat(pointService.getPoint(id).point()).isEqualTo(remainingPoint);
+
+    }
+
+    /**
+     * 포인트를 조회한다.
+     * 요구사항 2. 해당 id의 충전/차감 history를 확인 할 수 있다.
+     */
+    @Test
+    void getTest2() {
+        // given
+        long id = 1;
+        long startPoint = 0;
+        long chargePoint = 3000;
+        long usePoint = 1000;
+
+        UserPoint userPoint = new UserPoint(id, startPoint, System.currentTimeMillis());
+        when(userPointTable.selectById(id)).thenReturn(userPoint);
+        long timeMillis1 = System.currentTimeMillis();
+        when(pointHistoryTable.insert(eq(id), eq(chargePoint), eq(TransactionType.CHARGE), anyLong())).thenReturn(new PointHistory(1, id, chargePoint, TransactionType.CHARGE, System.currentTimeMillis()));
+        when(userPointTable.insertOrUpdate(id, chargePoint)).thenReturn(new UserPoint(id, startPoint + chargePoint, System.currentTimeMillis()));
+        // 포인트 충전
+        userPoint = pointService.chargePoint(id, chargePoint);
+
+        when(userPointTable.selectById(id)).thenReturn(userPoint);
+        long timeMillis2 = System.currentTimeMillis();
+        when(pointHistoryTable.insert(eq(id), eq(usePoint), eq(TransactionType.USE), anyLong())).thenReturn(new PointHistory(2, id, usePoint, TransactionType.USE, System.currentTimeMillis()));
+        when(userPointTable.insertOrUpdate(eq(id), anyLong())).thenReturn(new UserPoint(id, startPoint + chargePoint - usePoint, System.currentTimeMillis()));
+        // 포인트 사용
+        userPoint = pointService.usePoint(id, usePoint);
+
+
+        when(pointHistoryTable.selectAllByUserId(id)).thenReturn(
+                new ArrayList<PointHistory>() {{
+                        add(new PointHistory(1, id, chargePoint, TransactionType.CHARGE, System.currentTimeMillis()));
+                        add(new PointHistory(2, id, usePoint, TransactionType.USE, System.currentTimeMillis()));
+                }}
+        );
+        // when
+        List<PointHistory> pointHistoryList = pointService.getHistory(id);
+
+        // then
+//        List<PointHistory> expected = List.of(
+//                new PointHistory(1, id, chargePoint, TransactionType.CHARGE, timeMillis1),
+//                new PointHistory(2, id, usePoint, TransactionType.USE, timeMillis2)
+//        );
+        // time기록이 있을 때 맞추기가 어렵다..
+        assertThat(pointHistoryList).extracting("id", "userId", "amount", "type").containsExactlyInAnyOrder(
+                tuple(1L, id, chargePoint, TransactionType.CHARGE),
+                tuple(2L, id, usePoint, TransactionType.USE)
+        );
     }
 }
